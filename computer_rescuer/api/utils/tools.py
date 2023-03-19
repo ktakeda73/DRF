@@ -1,8 +1,7 @@
 import os
-import json
 import jwt
 import hashlib
-import base64
+import random, string
 from computer_rescuer.settings import SECRET_KEY
 from api.models import UserInfo
 from rest_framework.authentication import get_authorization_header
@@ -30,3 +29,7 @@ def editDatetime(datetime, editType):
 def decodeToken(jwt_token):
     jwt_info = jwt.decode(jwt_token, SECRET_KEY)
     return jwt_info
+
+def randomStr(n):
+   randlst = [random.choice(string.ascii_letters + string.digits) for i in range(n)]
+   return ''.join(randlst)
