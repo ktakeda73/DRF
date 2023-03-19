@@ -27,14 +27,6 @@ def editDatetime(datetime, editType):
     
     return ret
 
-def decode_token(jwt_):
-    tmp = jwt_.split('.')
-
-    header = json.loads(base64.b64decode(tmp[0]).decode())
-    payload = json.loads(base64.b64decode(tmp[1]).decode())
-
-    return {'header': header}
-
 def decodeToken(jwt_token):
     jwt_info = jwt.decode(jwt_token, SECRET_KEY)
     return jwt_info
