@@ -19,7 +19,6 @@ def hash(password, salt):
 def encode_sha256(password):
     password = bytes(password, 'utf-8')
     digest = hashlib.sha256(password).hexdigest()
-    print(digest)
     return digest
 
 def editDatetime(datetime, editType):
