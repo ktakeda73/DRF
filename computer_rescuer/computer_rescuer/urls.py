@@ -15,16 +15,26 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path
+from user.views import UserInfoListView, UserInfoView, UserAddView, UserChangeView, ChangePassword
 from api.views import *
 
+
 urlpatterns = [
-    path('admin/', admin.site.urls),
+    #認証
     path('login/', Login.as_view()),
     path('url-login/', UrlLogin.as_view()),
-    path('attendance/', Attendance.as_view()),
-    path('user/add/', UserAdd.as_view()),
+    
+    #ユーザー
+    path('user/list/', UserInfoListView.as_view()),
+    path('user/info/', UserInfoView.as_view()),
+    path('user/add/', UserAddView.as_view()),
+    path('user/change/', UserChangeView.as_view()),
     path('user/password/', ChangePassword.as_view()),
-    path('user/change/', UserChange.as_view()),
+    
+    #出勤
+    path('attendance/', Attendance.as_view()),
+    
+    #出勤報告
     path('absence/add/', AbsenceAdd.as_view()),
     path('absence/change/', AbsenceChange.as_view())
     
