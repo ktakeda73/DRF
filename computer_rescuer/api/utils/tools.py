@@ -26,6 +26,11 @@ def editDatetime(datetime, editType):
     
     return ret
 
+def userPKFromToken(request):
+    jwt_ = request.META.get('HTTP_AUTHORIZATION').replace("RESCUER ","")
+    token = decodeToken(jwt_)
+    return token['userid']
+
 def decodeToken(jwt_token):
     jwt_info = jwt.decode(jwt_token, SECRET_KEY)
     return jwt_info

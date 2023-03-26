@@ -1,12 +1,13 @@
 import json
 import base64
-from api.utils.auth import JWTAuthentication
+from api.utils.auth import JWTAuthentication, AuthUser
 from api.utils.tools import *
+from api.ERROR import *
 from django.db import transaction 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
-from api.models import UserInfo, AbsenceReson
+from api.models import UserInfo
 
 class UserInfoListView(APIView):
     '''
@@ -21,38 +22,37 @@ class UserInfoListView(APIView):
     permission_classes = [IsAuthenticated, ]
     
     def get(self, request, *args, **kwargs):
+        if not AuthUser.authKind(request, 'listview'):
+            pk = userPKFromToken(request)
+            results = UserInfo.objects.filter(pk=pk).values('id','userid','user','email','auth_name_id','department_id','dispatch_id')    
+            return Response({'list': results})
         
         req = json.loads(request.body)
         condition = req.copy()
         del condition['limit']
         del condition['offset']
         
-        results = UserInfo.objects.filter(**condition)[int(req['offset']) : int(req['limit']) + int(req['offset'])]
-        results_list = list(results.values())
-        for i in range(len(results_list)):
-            del results_list[i]['created_dt']
-            del results_list[i]['updated_dt']
-            del results_list[i]['default_password']
-            del results_list[i]['default_salt']
-            del results_list[i]['password']
-            del results_list[i]['salt']
-
-        return Response({'status': 'OK', 'list': results_list})
+        results = UserInfo.objects.filter(**condition).values('id','userid','user','email','auth_name_id','department_id','dispatch_id')[int(req['offset']) : int(req['limit']) + int(req['offset'])]
+        
+        return Response({'list': results}, status=200)
     
 class UserInfoView(APIView):
+    '''
+    ユーザー情報取得
+    '''
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
     
-    def get(self, request, *args, **kwargs):
-        result = UserInfo.objects.filter(pk=json.loads(request.body)['id']).values()[0]
-        del result['created_dt']
-        del result['updated_dt']
-        del result['default_password']
-        del result['default_salt']
-        del result['password']
-        del result['salt']
-        return Response({'status': 'OK', 'result': result})
-
+    def get(self, request, pk):
+        try:
+            if not(AuthUser.authKind(request, 'view')) and userPKFromToken(request) != pk:
+                msg = getErrorMsg(AUTH_ERR, {'1':'ユーザー', '2': '閲覧'})
+                return Response({'detail': msg},status=403)
+            result = UserInfo.objects.filter(pk=pk).values('id','userid','user','email','auth_name_id','department_id','dispatch_id')[0]
+            return Response({'result': result},status=200)
+        except:
+            return Response({'detail': SYS_ERR}, status=503)
+        
 class UserAddView(APIView):
     '''
     ユーザー追加
@@ -69,71 +69,58 @@ class UserAddView(APIView):
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
     
-    def put(self, request, *args, **kwargs):
-        jwt_ = request.META.get('HTTP_AUTHORIZATION').replace("RESCUER ","")
-        token = decodeToken(jwt_)
-        userInfo = UserInfo.objects.get(pk=token['userid'])
-        if not bool(userInfo.is_superuser):
-            return Response({'detail':'ユーザー追加権限がありません'},status=400)
-        lastUserid = UserInfo.objects.order_by('userid').reverse().first().userid
+    def _get_userid(self):
         try:
+            lastUserid = UserInfo.objects.order_by('userid').reverse().first().userid
             userid_seq = int(lastUserid.replace('RESC','')) + 1
             userid = 'RESC' + '0' * (6 - len(str(userid_seq))) + str(userid_seq)
+            return userid
         except:
-            userid = 'RESC000001'
-            
-        username = json.loads(request.body)['username']
-        email = json.loads(request.body)['email']
+            raise
         
-        is_active = json.loads(request.body)['is_active']
-        is_superuser = json.loads(request.body)['is_superuser']
-        auth_name_id = json.loads(request.body)['auth_name_id']
-        department_id = json.loads(request.body)['department_id']
-        dispatch_id = json.loads(request.body)['dispatch_id']
-        
+    def _get_password(self):
         default_password = randomStr(10)
         salt = randomStr(100)
         password = encode_sha256(default_password)
+        return default_password, salt, password
+
+    def _loginUrl(self, userid, default_password):
+        text = userid + '&' + default_password
+        urlParam = str(base64.b64encode(text.encode()).decode())[::-1]
+        return urlParam
+    
+    def post(self, request, *args, **kwargs):
+        try:
+            if not(AuthUser.authKind(request, 'add')):
+                msg = getErrorMsg(AUTH_ERR, {'1':'ユーザー', '2': '追加'})
+                return Response({'detail': msg},status=403)
+
+            userid = self._get_userid()
+        except:
+            return Response({'detail': SYS_ERR},status=503)
         
-        text = userid + '&' + email
-        param = base64.b64encode(text.encode()).decode()
-        urlParam = str(param[::-1])
+        req = json.loads(request.body)
+        default_password, salt, password = self._get_password()
+        urlParam = self._loginUrl(userid, default_password)
         
         try:
-            UserInfo.objects.create(userid=userid,
-                                    user=username,
-                                    email=email,
-                                    default_password=password,
-                                    default_salt=salt,
-                                    password=password,
-                                    salt=salt,
-                                    is_active=is_active,
-                                    is_superuser=is_superuser,
-                                    auth_name_id=auth_name_id,
-                                    department_id=department_id,
-                                    dispatch_id=dispatch_id)
+            UserInfo.objects.create(userid=userid,user=req['username'],email=req['email'],
+                                    default_password=password,default_salt=salt,password=password,
+                                    salt=salt,is_active=req['is_active'],is_superuser=req['is_superuser'],auth_name_id=req['auth_name_id'],
+                                    department_id=req['department_id'],dispatch_id=req['dispatch_id'])
                                     
         except:
-            return Response({'detail': 'ユーザーは既に存在します'},status=400)
+            return Response({'detail': USER_EXIST_ERR},status=400)
         
-        return Response({'status': 'OK',
-                        'userid': userid,
-                        'username': username,
-                        'email': email,
-                        'password': default_password, 
-                        'is_active': is_active, 
-                        'is_superuser': is_superuser, 
-                        'auth_name_id': auth_name_id,
-                        'dispatch_id': dispatch_id, 
-                        'urlParam': urlParam},
-                        status=200)
-
+        return Response({'userid': userid,'username': req['username'],'email': req['email'],
+                        'password': default_password,'is_active': req['is_active'],'is_superuser': req['is_superuser'], 
+                        'auth_name_id': req['department_id'],'dispatch_id': req['dispatch_id'], 'urlParam': urlParam},status=200)
+        
 class UserChangeView(APIView):
     '''
     ユーザー変更
     id以外全項目任意
     {
-    "id": int,
     "username" : str,
     "password": str,
     "is_active" : bool,
@@ -144,40 +131,50 @@ class UserChangeView(APIView):
     '''
     authentication_classes = [JWTAuthentication, ]
     permission_classes = [IsAuthenticated, ]
-    
-    def put(self, request, *args, **kwargs):
-        req = json.loads(request.body)
-        userInfo = UserInfo.objects.get(pk=req['id'])
-        if not bool(userInfo.is_superuser):
-            return Response({'detail':'ユーザー変更権限がありません'})
-        
-        res ={}
-        with transaction.atomic():
-            for k, v in req.items():
-                if k == 'email':
-                    return Response({'detail': 'メールアドレスは変更できません'})
-                elif k == 'username':
-                    userInfo.user = v
-                    res[k] = v
-                elif k == 'password':
-                    userInfo.password = encode_sha256(v)
-                    userInfo.salt=randomStr(100)
-                    res[k] = v
-                elif k == 'is_active':
-                    userInfo.is_active = v
-                    res[k] = v
-                elif k == 'is_superuser':
-                    userInfo.is_superuser = v
-                    res[k] = v
-                elif k == 'auth_name_id':
-                    userInfo.auth_name_id = v
-                elif k == 'dispatch_id':
-                    userInfo.dispatch_id = v
-                    res[k] = v
+    def _shape(self, kwargs):
+        password_str = None
+        for k, v in list(kwargs.items()):
+            if k =='id' or k == 'userid' or k =='pk' or k == 'default_password' or k == 'password':
+                msg = {'detail': BODY_ERR}
+                return Response(msg, 400)
+            elif k == 'username':
+                del kwargs['username']
+                kwargs['user'] == v
+            elif k == 'password_reset' and kwargs['password_reset']:
+                password_str, salt, password = UserAddView._get_password(self)
+                del kwargs['password_reset']
+                kwargs['password'] = password
+                kwargs['salt'] = salt
             
-            userInfo.save()
+            if k == 'password_reset' and kwargs['password_reset'] == False:
+                del kwargs['password_reset']
         
-        return Response(res)
+        return kwargs, password_str
+    
+    def _res(self,kwargs, password_str):
+        for k, v in list(kwargs.items()):
+            if k == 'password':
+                del kwargs['salt']
+                kwargs['password'] = password_str
+        return kwargs
+    
+    def post(self, request, pk):
+        kwargs = json.loads(request.body)
+
+        if not(AuthUser.authKind(request, 'change')) and userPKFromToken(request) != pk:
+            msg = getErrorMsg(AUTH_ERR, {'1':'ユーザー', '2': '変更'})
+            return Response({'detail': msg},status=403)
+        
+        kwargs, password_str = self._shape(kwargs)
+        
+        try:
+            UserInfo.objects.filter(pk=pk).update(**kwargs)
+        except:
+            msg = {'detail': FIELD_ERR}
+            return Response(msg,status=403)
+        
+        kwargs = self._res(kwargs, password_str)
+        return Response(kwargs)
     
 class ChangePassword(APIView):
     '''
@@ -189,17 +186,20 @@ class ChangePassword(APIView):
         "confirm_password": str
     }
     '''
-    def put(self, request, *args, **kwargs):
+    def _get_req(self, request):
         email = json.loads(request.body)['email']
-        
-        try:
-            userInfo = UserInfo.objects.get(email=email)
-        except:
-            return Response({'detail': 'ユーザーが存在しません'})
-        
         password=json.loads(request.body)['password']
         newest_password=json.loads(request.body)['newest_password']
         confirm_password=json.loads(request.body)['confirm_password']
+        return email, password, newest_password, confirm_password
+        
+    def post(self, request, pk):
+        email, password, newest_password, confirm_password = self._get_req(request)
+        try:
+            userInfo = UserInfo.objects.get(pk=pk)
+        except:
+            return Response({'detail': 'ユーザーが存在しません'})
+        
         db_digest = hash(userInfo.password, userInfo.salt)
         digest = hash(encode_sha256(password), userInfo.salt)
         
@@ -216,4 +216,4 @@ class ChangePassword(APIView):
         userInfo.salt=randomStr(100)
         userInfo.save()
         
-        return Response({'status': 'OK', 'newest_password': newest_password})
+        return Response({'newest_password': newest_password}, status=200)

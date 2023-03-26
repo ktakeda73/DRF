@@ -7,7 +7,9 @@ from rest_framework.authentication import BaseAuthentication
 from rest_framework import exceptions
 from rest_framework.authentication import get_authorization_header
 from .tools import hash, encode_sha256
-from api.models import UserInfo
+from api.models import UserInfo, AuthGroup
+from computer_rescuer.BASE import TOKEN_LIFETIME
+from .tools import decodeToken
 
 class NormalAuthentication(BaseAuthentication):
     
@@ -36,14 +38,13 @@ class UrlAuthentication(BaseAuthentication):
     def authenticate(self, request):
         msg = '認証失敗'
         try:
-            _url = json.loads(request.body)['key']
-            reversed = str(_url[::-1])
-            param = base64.b64decode(reversed).decode()
+            _url = request._request.path.replace('/login/','')[::-1]
+            param = base64.b64decode(_url).decode()
+            userid = param.split('&')[0]
+            password = param.split('&')[1]
+            user_obj = UserInfo.objects.filter(userid=userid).first()
         except:
             raise exceptions.AuthenticationFailed(msg)
-        email = param.split('&')[1]
-        password = param.split('&')[0]
-        user_obj = UserInfo.objects.filter(email=email).first()
         
         if not user_obj:
             raise exceptions.AuthenticationFailed(msg)
@@ -61,7 +62,7 @@ class UrlAuthentication(BaseAuthentication):
         pass
 
 def generate_jwt(user):
-    timestamp = int(time.time()) + 3600
+    timestamp = int(time.time()) + 60 * int(TOKEN_LIFETIME)
     return jwt.encode(
         {"userid": user.pk, "email": user.email, "exp": timestamp},
         SECRET_KEY).decode("utf-8")
@@ -100,3 +101,27 @@ class JWTAuthentication(BaseAuthentication):
 
     def authenticate_header(self, request):
         pass
+
+class AuthUser():
+    def authKind(request, kind):
+        jwt_ = request.META.get('HTTP_AUTHORIZATION').replace("RESCUER ","")
+        token = decodeToken(jwt_)
+        pk = token['userid']
+        try:
+            user = UserInfo.objects.get(pk=pk)
+            auth = AuthGroup.objects.filter(pk=user.pk).values('user')[0]['user'].replace('[','').replace(']','')
+        except:
+            raise
+        if user.is_superuser:
+            return True
+        
+        authKind = {
+            'listview' : auth.split(',')[0],
+            'view' : auth.split(',')[1],
+            'add' : auth.split(',')[2],
+            'change' : auth.split(',')[3],
+            'delete' : auth.split(',')[4]
+        }
+         
+        return authKind[kind] == '1'
+        

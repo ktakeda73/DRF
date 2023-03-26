@@ -22,13 +22,13 @@ from api.views import *
 urlpatterns = [
     #認証
     path('login/', Login.as_view()),
-    path('url-login/', UrlLogin.as_view()),
+    path('login/<str:param>', UrlLogin.as_view()),
     
     #ユーザー
-    path('user/list/', UserInfoListView.as_view()),
-    path('user/info/', UserInfoView.as_view()),
+    path('user/', UserInfoListView.as_view()),
+    path('user/<int:pk>/', UserInfoView.as_view()),
     path('user/add/', UserAddView.as_view()),
-    path('user/change/', UserChangeView.as_view()),
+    path('user/change/<int:pk>/', UserChangeView.as_view()),
     path('user/password/', ChangePassword.as_view()),
     
     #出勤
